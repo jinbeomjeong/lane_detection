@@ -1,4 +1,4 @@
-import imagezmq, socket
+import imagezmq, socket, cv2
 import numpy as np
 from mss import mss
 
@@ -10,5 +10,6 @@ i = 0
 while True:
 	print(i)
 	frame = np.array(sct.grab(mon))
-	sender.send_image(socket.gethostname(), frame)
+	retval, frame = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 100])
+	sender.send_jpg(socket.gethostname(), frame)
 	i += 1
