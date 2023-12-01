@@ -44,10 +44,11 @@ def main():
 
     while True:
         img_process_start = time.time()
-        host_name, frame = image_hub.recv_image()
+        host_name, image_byte = image_hub.recv_jpg()
+        image_np = np.frombuffer(image_byte, dtype=np.uint8)
+        frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
         image_hub.send_reply(b'OK')
 
-        frame = frame[:, :, 0:3]
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = transform_img({'img': img})['img']
         x = transform_to_net({'img': img})['img']
