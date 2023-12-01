@@ -1,7 +1,4 @@
-import time
-import argparse
-import cv2
-import torch
+import time, argparse, cv2, torch, imagezmq
 import numpy as np
 from model import SCNN
 # from utils.prob2lines import getLane
@@ -25,7 +22,6 @@ color = np.array([[255, 255, 255], [150, 150, 150], [0, 0, 255], [30, 30, 255]],
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", '-i', type=str, default="demo/demo_video.mp4", help="Path to demo video")
     parser.add_argument("--weight_path", '-w', type=str, default="experiments/AI_Hub_mobilenetv2/mobilenet_v2_test.pth",
                         help="Path to model weights")
     parser.add_argument("--visualize", '-v', default=True, help="Visualize the result")
@@ -37,7 +33,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    video_path = args.video_path
     weight_path = args.weight_path
     exist_threshold = args.exist_threshold
 
@@ -45,15 +40,14 @@ def main():
     net.load_state_dict(save_dict['net'])
     net.eval()
 
-    cap = cv2.VideoCapture('d:\\video\\urban_street.mp4')
+    image_hub = imagezmq.ImageHub()
 
-    while cap.isOpened():
+    while True:
         img_process_start = time.time()
-        ret, frame = cap.read()
+        host_name, frame = image_hub.recv_image()
+        image_hub.send_reply(b'OK')
 
-        if ret is False or frame is None:
-            break
-        print(frame.shape)
+        frame = frame[:, :, 0:3]
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = transform_img({'img': img})['img']
         x = transform_to_net({'img': img})['img']
@@ -93,7 +87,6 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    cap.release()
     cv2.destroyAllWindows()
 
 

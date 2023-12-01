@@ -1,4 +1,4 @@
-import argparse
+import argparse, config
 import json
 import os
 import shutil
@@ -8,7 +8,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from config import *
 import dataset
 from model import SCNN
 from utils.tensorboard import TensorBoard
@@ -48,14 +47,14 @@ transform_train = Compose(Resize(resize_shape), Rotation(2), ToTensor(),
                           Normalize(mean=mean, std=std))
 dataset_name = exp_cfg['dataset'].pop('dataset_name')
 Dataset_Type = getattr(dataset, dataset_name)
-train_dataset = Dataset_Type(Dataset_Path[dataset_name], "train", transform_train)
+train_dataset = Dataset_Type(config.Dataset_Path[dataset_name], "train", transform_train)
 train_loader = DataLoader(train_dataset, batch_size=exp_cfg['dataset']['batch_size'], shuffle=True, collate_fn=train_dataset.collate, num_workers=8)
 
 # ------------ val data ------------
 transform_val_img = Resize(resize_shape)
 transform_val_x = Compose(ToTensor(), Normalize(mean=mean, std=std))
 transform_val = Compose(transform_val_img, transform_val_x)
-val_dataset = Dataset_Type(Dataset_Path[dataset_name], "val", transform_val)
+val_dataset = Dataset_Type(config.Dataset_Path[dataset_name], "val", transform_val)
 val_loader = DataLoader(val_dataset, batch_size=8, collate_fn=val_dataset.collate, num_workers=4)
 
 # ------------ preparation ------------

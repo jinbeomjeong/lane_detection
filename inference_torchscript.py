@@ -1,26 +1,23 @@
-import time
-import argparse
-import cv2
-import torch
+import torch, cv2, argparse, time
 import numpy as np
 from model import SCNN
-# from utils.prob2lines import getLane
 from utils.transforms import Resize, Compose, ToTensor, Normalize
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # 모델이 gpu 에서 동작하도록 (gpu가 없으면 cpu)
-net = SCNN(input_size=(512, 288), pretrained=False)
-net.to(device) # 모델이 gpu 에서 동작하도록 (gpu가 없으면 cpu)
 
 mean = (0.3598, 0.3653, 0.3662) # CULane 데이터셋의 mean, std
 std = (0.2573, 0.2663, 0.2756)
+color = np.array([[255, 255, 255], [150, 150, 150], [0, 0, 255], [30, 30, 255]], dtype='uint8')
 
-# mean = (0.485, 0.456, 0.406) # Imagenet 데이터셋의 mean, std
-# std = (0.229, 0.224, 0.225)
+device = torch.device("cuda:0")
+net = torch.jit.load('./weights/mobilenet_v2_test_best.torchscript')
+state_dict = torch.load('./weights/mobilenet_v2_test_best.pth', map_location=device)
 
 transform_img = Resize((512, 288))
 transform_to_net = Compose(ToTensor(), Normalize(mean=mean, std=std))
 
-color = np.array([[255, 255, 255], [150, 150, 150], [0, 0, 255], [30, 30, 255]], dtype='uint8')
+net.to(device)
+net.load_state_dict(state_dict['net'])
+net.eval()
 
 
 def parse_args():
@@ -41,10 +38,6 @@ def main():
     weight_path = args.weight_path
     exist_threshold = args.exist_threshold
 
-    save_dict = torch.load(weight_path, map_location=device)
-    net.load_state_dict(save_dict['net'])
-    net.eval()
-
     cap = cv2.VideoCapture('d:\\video\\urban_street.mp4')
 
     while cap.isOpened():
@@ -53,7 +46,7 @@ def main():
 
         if ret is False or frame is None:
             break
-        print(frame.shape)
+
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = transform_img({'img': img})['img']
         x = transform_to_net({'img': img})['img']
