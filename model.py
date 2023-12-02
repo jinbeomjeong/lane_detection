@@ -5,12 +5,7 @@ import torchvision.models as models
 
 
 class SCNN(nn.Module):
-    def __init__(
-            self,
-            input_size,
-            ms_ks=9,
-            pretrained=True
-    ):
+    def __init__(self, input_size, ms_ks=9, pretrained=True):
         """
         Argument
             ms_ks: kernel size in message passing conv
@@ -18,6 +13,7 @@ class SCNN(nn.Module):
         super(SCNN, self).__init__()
         self.pretrained = pretrained
         self.net_init(input_size, ms_ks)
+
         if not pretrained:
             self.weight_init()
 
@@ -92,7 +88,7 @@ class SCNN(nn.Module):
         input_w, input_h = input_size
         self.fc_input_feature = 5 * int(input_w/16) * int(input_h/16)
         # self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
-        self.backbone = models.mobilenet_v2(weights=self.pretrained).features
+        self.backbone = models.mobilenet_v3_small(weights=None).features
 
         # backbone post-processing
         param_list = []

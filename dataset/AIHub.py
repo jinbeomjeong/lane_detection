@@ -64,16 +64,20 @@ class AIHub(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if self.image_set != 'test':
             segLabel = cv2.imread(self.segLabel_list[idx])[:, :, 0]
+
             if np.max(segLabel) > 4 and np.min(segLabel) < 0:
                 print(self.segLabel_list[idx])
             exist = np.array(self.exist_list[idx])
+
         else:
             segLabel = None
             exist = None
+
         sample = {'img': img, # 원본 이미지
                   'segLabel': segLabel, # segmentation 정보가 표시된 이미지, shape: (원본 이미지의 height, 원본 이미지의 width, 1)
                   'exist': exist, # 각 클래스가 이미지에 존재하는지 여부, 예시: [1, 0, 0, 1]
                   'img_name': self.img_list[idx]}
+
         if self.transforms is not None:
             sample = self.transforms(sample)
         return sample

@@ -20,17 +20,22 @@ def parse_args():
     parser.add_argument("--exp_dir", type=str, default="./experiments/AI_Hub_Dataset")
     parser.add_argument("--resume", "-r", action="store_true")
     args = parser.parse_args()
+
     return args
+
+
 args = parse_args()
 
 # ------------ config ------------
 exp_dir = args.exp_dir
-while exp_dir[-1]=='/':
+while exp_dir[-1] == '/':
     exp_dir = exp_dir[:-1]
+
 exp_name = exp_dir.split('/')[-1]
 
 with open(os.path.join(exp_dir, "cfg.json")) as f:
     exp_cfg = json.load(f)
+
 resize_shape = tuple(exp_cfg['dataset']['resize_shape'])
 
 device = torch.device(exp_cfg['device'])
@@ -38,17 +43,18 @@ tensorboard = TensorBoard(exp_dir)
 
 # ------------ train data ------------
 # CULane mean, std
-mean=(0.3598, 0.3653, 0.3662)
-std=(0.2573, 0.2663, 0.2756)
+mean = (0.3598, 0.3653, 0.3662)
+std = (0.2573, 0.2663, 0.2756)
 # Imagenet mean, std
 # mean=(0.485, 0.456, 0.406)
 # std=(0.229, 0.224, 0.225)
-transform_train = Compose(Resize(resize_shape), Rotation(2), ToTensor(),
-                          Normalize(mean=mean, std=std))
+
+transform_train = Compose(Resize(resize_shape), Rotation(2), ToTensor(), Normalize(mean=mean, std=std))
 dataset_name = exp_cfg['dataset'].pop('dataset_name')
 Dataset_Type = getattr(dataset, dataset_name)
 train_dataset = Dataset_Type(config.Dataset_Path[dataset_name], "train", transform_train)
-train_loader = DataLoader(train_dataset, batch_size=exp_cfg['dataset']['batch_size'], shuffle=True, collate_fn=train_dataset.collate, num_workers=8)
+train_loader = DataLoader(train_dataset, batch_size=exp_cfg['dataset']['batch_size'], shuffle=True,
+                          collate_fn=train_dataset.collate, num_workers=8)
 
 # ------------ val data ------------
 transform_val_img = Resize(resize_shape)
@@ -86,6 +92,7 @@ def train(epoch):
             loss_seg = loss_seg.sum()
             loss_exist = loss_exist.sum()
             loss = loss.sum()
+
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
@@ -163,13 +170,14 @@ def val(epoch):
                     for i in range(0, 4):
                         if exist_pred[b, i] > 0.5:
                             lane_img[coord_mask==(i+1)] = color[i]
+
                     img = cv2.addWeighted(src1=lane_img, alpha=0.8, src2=img, beta=1., gamma=0.)
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                     lane_img = cv2.cvtColor(lane_img, cv2.COLOR_BGR2RGB)
                     cv2.putText(lane_img, "{}".format([1 if exist_pred[b, i]>0.5 else 0 for i in range(4)]), (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2)
                     origin_imgs.append(img)
                     origin_imgs.append(lane_img)
-                tensorboard.image_summary("img_{}".format(batch_idx), origin_imgs, epoch)
+                # tensorboard.image_summary("img_{}".format(batch_idx), origin_imgs, epoch)
 
             val_loss += loss.item()
             val_loss_seg += loss_seg.item()
