@@ -88,7 +88,7 @@ class SCNN(nn.Module):
         input_w, input_h = input_size
         self.fc_input_feature = 5 * int(input_w/16) * int(input_h/16)
         # self.backbone = models.vgg16_bn(pretrained=self.pretrained).features
-        self.backbone = models.mobilenet_v3_small(weights=None).features
+        self.backbone = models.mobilenet_v2(weights=None).features
 
         # backbone post-processing
         param_list = []
