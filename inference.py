@@ -4,12 +4,9 @@ import cv2
 import torch
 import numpy as np
 from model import SCNN
-#from cupyx.scipy.interpolate import BSpline
-#import cupy as cp
-from scipy.interpolate import BSpline
-# from utils.prob2lines import getLane
 from utils.transforms import Resize, Compose, ToTensor, Normalize
 from sklearn.linear_model import RANSACRegressor
+from scipy.stats import linregress
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -27,7 +24,7 @@ args = parse_args()
 video_path = args.video_path
 weight_path = args.weight_path
 exist_threshold = args.exist_threshold
-
+weight_path = "./AI_Hub_Dataset.pth"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # 모델이 gpu 에서 동작하도록 (gpu가 없으면 cpu)
 input_size = (512, 288)
@@ -56,10 +53,13 @@ right_mask_img = cv2.imread(filename="right_mask.jpg")
 right_mask_img = cv2.cvtColor(right_mask_img, cv2.COLOR_RGB2GRAY)
 right_mask_img = cv2.resize(src=right_mask_img, dsize=(960, 540), interpolation=cv2.INTER_AREA)
 
-vehicle_pos = 930
+est_left_lane = RANSACRegressor()
+est_right_lane = RANSACRegressor()
 
+vehicle_pos = 930/2
+vanishing_row_pos = 300
 
-cap = cv2.VideoCapture('d:\\video\\img_1579.MOV')
+cap = cv2.VideoCapture('d:\\video\\img_1580.MOV')
 
 
 @torch.no_grad()
@@ -94,8 +94,6 @@ def main():
             if exist_pred[0, i] > exist_threshold:
                 lane_img[coord_mask == (i + 1)] = color[0]
 
-        #fps = 1 / (time.time() - t0)
-        #print("fps-image_processing: ", fps)
         lane_img = cv2.resize(lane_img, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
         result_frame = cv2.addWeighted(src1=lane_img, alpha=0.8, src2=frame, beta=1., gamma=0.)
 
@@ -108,29 +106,34 @@ def main():
         right_lane_img *= 255
 
         left_lane_pos = []
+        left_est_pos = []
+
         for i, row in enumerate(left_lane_img):
-            if i%5 == 0:
+            if i % 5 == 0:
                 if any(row):
                     left_lane_pos.append([i, np.argmax(row)])
 
         left_lane_pos_arr = np.array(left_lane_pos)
 
         if len(left_lane_pos) > 5:
-            est_left_lane = RANSACRegressor()
             est_left_lane.fit(left_lane_pos_arr[:, 0].reshape(-1, 1), left_lane_pos_arr[:, 1].reshape(-1, 1), sample_weight=5)
-
             out = est_left_lane.predict(left_lane_pos_arr[:, 0].reshape(-1, 1))
             out = out.reshape(-1)
 
-            left_est_pos = []
             for i, pos in enumerate(left_lane_pos_arr):
                 left_est_pos.append([out[i], pos[0]])
 
             left_est_pos = np.array(left_est_pos, dtype=np.int32)
 
+            left_lane_slope, left_lane_intercept, r, p, se = linregress(left_est_pos[:, 1], left_est_pos[:, 0])
+
             cv2.polylines(img=result_frame, pts=[left_est_pos], isClosed=False, color=(0, 0, 255), thickness=2)
+            cv2.line(img=result_frame, pt1=(int((vanishing_row_pos*left_lane_slope)+left_lane_intercept), int(vanishing_row_pos)),
+                     pt2=(int((540*left_lane_slope)+left_lane_intercept), 540), color=(255, 0, 0), thickness=2)
 
         right_lane_pos = []
+        right_est_pos = []
+
         for i, row in enumerate(right_lane_img):
             if i % 5 == 0:
                 if any(row):
@@ -139,26 +142,26 @@ def main():
         right_lane_pos_arr = np.array(right_lane_pos)
 
         if len(right_lane_pos) > 5:
-            est_right_lane = RANSACRegressor()
             est_right_lane.fit(right_lane_pos_arr[:, 0].reshape(-1, 1), right_lane_pos_arr[:, 1].reshape(-1, 1), sample_weight=5)
-
             out = est_right_lane.predict(right_lane_pos_arr[:, 0].reshape(-1, 1))
             out = out.reshape(-1)
 
-            right_est_pos = []
             for i, pos in enumerate(right_lane_pos_arr):
                 right_est_pos.append([out[i], pos[0]])
 
             right_est_pos = np.array(right_est_pos, dtype=np.int32)
 
+            right_lane_slope, right_lane_intercept, r, p, se = linregress(right_est_pos[:, 1], right_est_pos[:, 0])
+
             cv2.polylines(img=result_frame, pts=[right_est_pos], isClosed=False, color=(0, 0, 255), thickness=2)
+            cv2.line(img=result_frame, pt1=(int((vanishing_row_pos * right_lane_slope) + right_lane_intercept), int(vanishing_row_pos)),
+                     pt2=(int((540 * right_lane_slope) + right_lane_intercept), 540), color=(255, 0, 0), thickness=2)
 
         fps = 1 / (time.time() - t0)
         print("fps-image_processing: ", fps)
 
         if args.visualize:
             cv2.imshow("frame", result_frame)
-
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
