@@ -1,0 +1,3 @@
+/mnt/workspace/lane_dataset/test/m_1936_1464_daylight_2
+/mnt/workspace/lane_dataset/test/m_1936_1464_night_1
+/mnt/workspace/lane_dataset/test/m_1936_1464_daylight_1

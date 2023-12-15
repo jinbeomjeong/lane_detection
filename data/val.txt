@@ -1,0 +1,5 @@
+/mnt/workspace/lane_dataset/val/m_1920_1200_daylight_1
+/mnt/workspace/lane_dataset/val/m_1280_720_night_1
+/mnt/workspace/lane_dataset/val/m_1280_720_daylight_1
+/mnt/workspace/lane_dataset/val/m_1920_1200_night_1
+/mnt/workspace/lane_dataset/val/m_1280_720_daylight_2

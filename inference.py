@@ -1,169 +1,158 @@
-import time
-import argparse
-import cv2
-import torch
+import cv2, torch, time
 import numpy as np
-from model import SCNN
-from utils.transforms import Resize, Compose, ToTensor, Normalize
+from module import LaneClassification
+from torchvision import transforms
 from sklearn.linear_model import RANSACRegressor
-from scipy.stats import linregress
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", '-i', type=str, default="demo/demo_video.mp4", help="Path to demo video")
-    parser.add_argument("--weight_path", '-w', type=str, default="experiments/AI_Hub_mobilenetv2/mobilenet_v2_test.pth",
-                        help="Path to model weights")
-    parser.add_argument("--visualize", '-v', default=True, help="Visualize the result")
-    parser.add_argument("--exist_threshold", '-e', type=float, default=0.35, help="A confidence threshold")
+device = torch.device('cuda:0')
+model = LaneClassification.load_from_checkpoint(checkpoint_path='resnet_50_640_360.ckpt',
+                                                map_location='cuda:0')
+model.eval()
 
-    args = parser.parse_args()
-    return args
+cap = cv2.VideoCapture("d:\\video\\urban_street.mp4")
+ret, frame = cap.read()
+h, w = frame.shape[0:2]
 
+fps = 0.0
+t0 = time.time()
 
-args = parse_args()
-video_path = args.video_path
-weight_path = args.weight_path
-exist_threshold = args.exist_threshold
-weight_path = "./AI_Hub_Dataset.pth"
+input_height = 360
+input_width = 640
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # 모델이 gpu 에서 동작하도록 (gpu가 없으면 cpu)
-input_size = (512, 288)
-net = SCNN(input_size=input_size, pretrained=False)
-net.to(device) # 모델이 gpu 에서 동작하도록 (gpu가 없으면 cpu)
-save_dict = torch.load(weight_path, map_location=device)
-net.load_state_dict(save_dict['net'])
-net.eval()
+vanishing_row_pos = 220
+look_ahead_row_pos = 250
+vehicle_center_pos = 315
 
-mean = (0.3598, 0.3653, 0.3662) # CULane 데이터셋의 mean, std
-std = (0.2573, 0.2663, 0.2756)
+lane_roi_row_pos = 250
 
-# mean = (0.485, 0.456, 0.406) # Imagenet 데이터셋의 mean, std
-# std = (0.229, 0.224, 0.225)
-
-transform_img = Resize(input_size)
-transform_to_net = Compose(ToTensor(), Normalize(mean=mean, std=std))
-
-color = np.array([[255, 255, 255], [150, 150, 150], [0, 0, 255], [30, 30, 255]], dtype='uint8')
-
-left_mask_img = cv2.imread(filename="left_mask.jpg")
-left_mask_img = cv2.cvtColor(left_mask_img, cv2.COLOR_RGB2GRAY)
-left_mask_img = cv2.resize(src=left_mask_img, dsize=(960, 540), interpolation=cv2.INTER_AREA)
-
-right_mask_img = cv2.imread(filename="right_mask.jpg")
-right_mask_img = cv2.cvtColor(right_mask_img, cv2.COLOR_RGB2GRAY)
-right_mask_img = cv2.resize(src=right_mask_img, dsize=(960, 540), interpolation=cv2.INTER_AREA)
+lane_ref_row_pos = np.array(list(range(look_ahead_row_pos, input_height, 5)), dtype=np.int32)
 
 est_left_lane = RANSACRegressor()
 est_right_lane = RANSACRegressor()
 
-vehicle_pos = 930/2
-vanishing_row_pos = 300
+left_lane_est_pos = np.zeros((2, 2), dtype=np.int32)
+right_lane_est_pos = np.zeros((2, 2), dtype=np.int32)
+lane_center_pos_list = []
+lane_center_pos_arr = np.array([], dtype=np.int32)
 
-cap = cv2.VideoCapture('d:\\video\\img_1580.MOV')
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+cv2.namedWindow(winname='frame', flags=cv2.WINDOW_NORMAL)
 
 
 @torch.no_grad()
 def main():
+    global fps, t0, ret, frame, left_lane_est_pos, right_lane_est_pos, lane_center_pos_list, lane_center_pos_arr
+    
     while cap.isOpened():
+        start.record()
         t0 = time.time()
         ret, frame = cap.read()
-        frame = cv2.resize(src=frame, dsize=(960, 540), interpolation=cv2.INTER_AREA)
+        
+        if ret:
+            frame = cv2.resize(src=frame, dsize=(input_width, input_height), interpolation=cv2.INTER_AREA)
+            img_tensor = transforms.functional.to_tensor(frame)
+            img_tensor.unsqueeze_(0)
+            output = model.forward(img_tensor.to(device))
 
-        if ret is False or frame is None:
-            break
+            lane_img = torch.sigmoid(output['out'])
+            lane_img = torch.argmax(lane_img[0], 0)
+            lane_img = lane_img.cpu().numpy().astype(np.uint8)
 
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = transform_img({'img': img})['img']
-        x = transform_to_net({'img': img})['img']
-        x.unsqueeze_(0)
+            left_lane_img = lane_img[:, 0:vehicle_center_pos]
+            left_lane_pos = np.argwhere(left_lane_img > 0)
 
-        seg_pred, exist_pred = net(x.to(device))[:2]
-        seg_pred = seg_pred.detach().cpu().numpy()
-        seg_pred = seg_pred[0]
+            right_lane_img = lane_img[:, vehicle_center_pos:input_width]
+            right_lane_pos = np.argwhere(right_lane_img > 0)
+            right_lane_pos[:, 1] = right_lane_pos[:, 1] + vehicle_center_pos
 
-        exist_pred = exist_pred.detach().cpu().numpy()
+            fps = 1 / (time.time() - t0)
+            #print("fps-image_processing: ", fps)
 
-        exist = [1 if exist_pred[0, i] > exist_threshold else 0 for i in range(4)]
+            frame_2 = cv2.resize(frame, (input_width, input_height), interpolation=cv2.INTER_AREA)
+            lane_img *= 255
+            lane_img = cv2.cvtColor(lane_img, cv2.COLOR_GRAY2RGB)
+            result_frame = cv2.addWeighted(src1=lane_img, alpha=0.5, src2=frame_2, beta=1., gamma=0.)
 
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        lane_img = np.zeros_like(img)
+            extract_left_lane_pos = []
 
-        coord_mask = np.argmax(seg_pred, axis=0)
+            for row in range(look_ahead_row_pos, input_height):
+                find_lane = left_lane_pos[:, 0] == row
 
-        for i in range(0, 4):
-            if exist_pred[0, i] > exist_threshold:
-                lane_img[coord_mask == (i + 1)] = color[0]
+                if np.any(find_lane):
+                    left_lane_x_pos = np.max(left_lane_pos[:, 1][find_lane])
 
-        lane_img = cv2.resize(lane_img, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
-        result_frame = cv2.addWeighted(src1=lane_img, alpha=0.8, src2=frame, beta=1., gamma=0.)
+                    if vehicle_center_pos - left_lane_x_pos < 200:
+                        extract_left_lane_pos.append([row, left_lane_x_pos])
 
-        lane_img_logical = cv2.cvtColor(lane_img, cv2.COLOR_RGB2GRAY)
+            extract_left_lane_pos = np.array(extract_left_lane_pos, dtype=np.int32)
+            available_left_lane_pos = (extract_left_lane_pos.shape[0]/(input_height-look_ahead_row_pos)) > 0.3
 
-        left_lane_img = np.multiply(left_mask_img/255, lane_img_logical/255)
-        left_lane_img *= 255
+            if available_left_lane_pos:
+                est_left_lane.fit(extract_left_lane_pos[:, 0].reshape(-1, 1), extract_left_lane_pos[:, 1].reshape(-1, 1),
+                                  sample_weight=5)
+                out = est_left_lane.predict(lane_ref_row_pos.reshape(-1, 1))
+                out = out.reshape(-1).astype(np.int32)
+                left_lane_est_pos = np.vstack([lane_ref_row_pos, out]).T
 
-        right_lane_img = np.multiply(right_mask_img/255, lane_img_logical/255)
-        right_lane_img *= 255
+            for pos in left_lane_est_pos:
+                cv2.circle(img=result_frame, center=(pos[1], pos[0]), radius=1, color=(0, 255, 255), thickness=2)
 
-        left_lane_pos = []
-        left_est_pos = []
+            extract_right_lane_pos = []
 
-        for i, row in enumerate(left_lane_img):
-            if i % 5 == 0:
-                if any(row):
-                    left_lane_pos.append([i, np.argmax(row)])
+            for row in range(look_ahead_row_pos, input_height):
+                find_lane = right_lane_pos[:, 0] == row
 
-        left_lane_pos_arr = np.array(left_lane_pos)
+                if np.any(find_lane):
+                    right_lane_x_pos = np.min(right_lane_pos[:, 1][find_lane])
 
-        if len(left_lane_pos) > 5:
-            est_left_lane.fit(left_lane_pos_arr[:, 0].reshape(-1, 1), left_lane_pos_arr[:, 1].reshape(-1, 1), sample_weight=5)
-            out = est_left_lane.predict(left_lane_pos_arr[:, 0].reshape(-1, 1))
-            out = out.reshape(-1)
+                    if right_lane_x_pos - vehicle_center_pos < 200:
+                        extract_right_lane_pos.append([row, right_lane_x_pos])
 
-            for i, pos in enumerate(left_lane_pos_arr):
-                left_est_pos.append([out[i], pos[0]])
+            extract_right_lane_pos = np.array(extract_right_lane_pos, dtype=np.int32)
+            available_right_lane_pos = (extract_right_lane_pos.shape[0] / (input_height - look_ahead_row_pos)) > 0.3
 
-            left_est_pos = np.array(left_est_pos, dtype=np.int32)
+            if available_right_lane_pos:
+                est_right_lane.fit(extract_right_lane_pos[:, 0].reshape(-1, 1), extract_right_lane_pos[:, 1].reshape(-1, 1),
+                                   sample_weight=5)
+                out = est_right_lane.predict(lane_ref_row_pos.reshape(-1, 1))
+                out = out.reshape(-1).astype(np.int32)
+                right_lane_est_pos = np.vstack([lane_ref_row_pos, out]).T
 
-            left_lane_slope, left_lane_intercept, r, p, se = linregress(left_est_pos[:, 1], left_est_pos[:, 0])
+            for pos in right_lane_est_pos:
+                cv2.circle(img=result_frame, center=(pos[1], pos[0]), radius=1, color=(255, 255, 0), thickness=2)
 
-            cv2.polylines(img=result_frame, pts=[left_est_pos], isClosed=False, color=(0, 0, 255), thickness=2)
-            cv2.line(img=result_frame, pt1=(int((vanishing_row_pos*left_lane_slope)+left_lane_intercept), int(vanishing_row_pos)),
-                     pt2=(int((540*left_lane_slope)+left_lane_intercept), 540), color=(255, 0, 0), thickness=2)
+            lane_center_pos_list.clear()
 
-        right_lane_pos = []
-        right_est_pos = []
+            if available_left_lane_pos and available_right_lane_pos:
+                for i, row in enumerate(lane_ref_row_pos):
+                    lane_center_x_pos = ((right_lane_est_pos[i, 1]-left_lane_est_pos[i, 1])/2)+left_lane_est_pos[i, 1]
+                    lane_center_pos_list.append([row, lane_center_x_pos])
 
-        for i, row in enumerate(right_lane_img):
-            if i % 5 == 0:
-                if any(row):
-                    right_lane_pos.append([i, np.argmax(row)])
+                lane_center_pos_arr = np.array(lane_center_pos_list, dtype=np.int32)
 
-        right_lane_pos_arr = np.array(right_lane_pos)
+            for pos in lane_center_pos_arr:
+                cv2.circle(img=result_frame, center=(pos[1], pos[0]), radius=1, color=(255, 0, 0), thickness=2)
 
-        if len(right_lane_pos) > 5:
-            est_right_lane.fit(right_lane_pos_arr[:, 0].reshape(-1, 1), right_lane_pos_arr[:, 1].reshape(-1, 1), sample_weight=5)
-            out = est_right_lane.predict(right_lane_pos_arr[:, 0].reshape(-1, 1))
-            out = out.reshape(-1)
+            cv2.line(img=result_frame, pt1=([vehicle_center_pos, look_ahead_row_pos]), pt2=([vehicle_center_pos, 540]),
+                     color=(0, 0, 255), thickness=2)
 
-            for i, pos in enumerate(right_lane_pos_arr):
-                right_est_pos.append([out[i], pos[0]])
+            left_lane_x_axis_dist = vehicle_center_pos-left_lane_est_pos[left_lane_est_pos.shape[0]-1, 1]
+            right_lane_x_axis_dist = right_lane_est_pos[right_lane_est_pos.shape[0]-1, 1]-vehicle_center_pos
 
-            right_est_pos = np.array(right_est_pos, dtype=np.int32)
+            left_lane_departure = left_lane_x_axis_dist < 50
+            right_lane_departure = right_lane_x_axis_dist < 50
 
-            right_lane_slope, right_lane_intercept, r, p, se = linregress(right_est_pos[:, 1], right_est_pos[:, 0])
-
-            cv2.polylines(img=result_frame, pts=[right_est_pos], isClosed=False, color=(0, 0, 255), thickness=2)
-            cv2.line(img=result_frame, pt1=(int((vanishing_row_pos * right_lane_slope) + right_lane_intercept), int(vanishing_row_pos)),
-                     pt2=(int((540 * right_lane_slope) + right_lane_intercept), 540), color=(255, 0, 0), thickness=2)
-
-        fps = 1 / (time.time() - t0)
-        print("fps-image_processing: ", fps)
-
-        if args.visualize:
             cv2.imshow("frame", result_frame)
+            end.record()
+            torch.cuda.synchronize()
+            #print(start.elapsed_time(end))
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        else:
             break
 
     cap.release()
