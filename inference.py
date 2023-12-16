@@ -4,6 +4,7 @@ from module import LaneClassification
 from torchvision import transforms
 from sklearn.linear_model import RANSACRegressor
 
+
 device = torch.device('cuda:0')
 model = LaneClassification.load_from_checkpoint(checkpoint_path='resnet_50_640_360.ckpt',
                                                 map_location='cuda:0')
@@ -14,7 +15,6 @@ ret, frame = cap.read()
 h, w = frame.shape[0:2]
 
 fps = 0.0
-t0 = time.time()
 
 input_height = 360
 input_width = 640
@@ -39,15 +39,20 @@ start = torch.cuda.Event(enable_timing=True)
 end = torch.cuda.Event(enable_timing=True)
 
 cv2.namedWindow(winname='frame', flags=cv2.WINDOW_NORMAL)
+font = cv2.FONT_HERSHEY_COMPLEX
+
+elapsed_time = 0.0
+start_time = time.time()
+frame_idx = 0
+t0 = time.time()
 
 
 @torch.no_grad()
 def main():
-    global fps, t0, ret, frame, left_lane_est_pos, right_lane_est_pos, lane_center_pos_list, lane_center_pos_arr
+    global elapsed_time, frame_idx, fps, t0, ret, frame, left_lane_est_pos, right_lane_est_pos, lane_center_pos_list, lane_center_pos_arr
     
     while cap.isOpened():
-        start.record()
-        t0 = time.time()
+        elapsed_time = time.time() - start_time
         ret, frame = cap.read()
         
         if ret:
@@ -132,6 +137,10 @@ def main():
 
                 lane_center_pos_arr = np.array(lane_center_pos_list, dtype=np.int32)
 
+                lane_slope = np.rad2deg(np.arctan2(lane_center_pos_arr[lane_center_pos_arr.shape[0]-1][0]-lane_center_pos_arr[0, 0],
+                                                   lane_center_pos_arr[lane_center_pos_arr.shape[0]-1][1]-lane_center_pos_arr[0, 1]))
+                # print(lane_slope-90)
+
             for pos in lane_center_pos_arr:
                 cv2.circle(img=result_frame, center=(pos[1], pos[0]), radius=1, color=(255, 0, 0), thickness=2)
 
@@ -141,13 +150,17 @@ def main():
             left_lane_x_axis_dist = vehicle_center_pos-left_lane_est_pos[left_lane_est_pos.shape[0]-1, 1]
             right_lane_x_axis_dist = right_lane_est_pos[right_lane_est_pos.shape[0]-1, 1]-vehicle_center_pos
 
-            left_lane_departure = left_lane_x_axis_dist < 50
-            right_lane_departure = right_lane_x_axis_dist < 50
+            lane_rel_pos = right_lane_x_axis_dist-left_lane_x_axis_dist
+
+            fps = 1 / (time.time() - t0)
+            t0 = time.time()
+
+            cv2.putText(result_frame, f'Elapsed Time(sec): {elapsed_time: .2f}', (5, 20), font, 0.5, [0, 0, 255], 1)
+            cv2.putText(result_frame, f'Process Speed(FPS): {fps: .2f}', (5, 40), font, 0.5, [0, 0, 255], 1)
+            cv2.putText(result_frame, f'N of Frame: {frame_idx}', (5, 60), font, 0.5, [0, 0, 255], 1)
 
             cv2.imshow("frame", result_frame)
-            end.record()
-            torch.cuda.synchronize()
-            #print(start.elapsed_time(end))
+            frame_idx += 1
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break

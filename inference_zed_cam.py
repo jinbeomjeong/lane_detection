@@ -4,13 +4,13 @@ import pandas as pd
 from module import LaneClassification
 from torchvision import transforms
 from sklearn.linear_model import RANSACRegressor
+from utils.lane_detection_recognition import lane_det_filter
 
 device = torch.device('cuda:0')
 model = LaneClassification.load_from_checkpoint(checkpoint_path='resnet_50_640_360_v2.ckpt',
                                                 map_location='cuda:0')
 model.eval()
 
-# cap = cv2.VideoCapture("/home/nvidia/Videos/urban_street.mp4")
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 2560)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -55,14 +55,6 @@ elapsed_time = 0.0
 start_time = time.time()
 frame_idx = 0
 normal_lane_det = 0
-
-left_lane_det_prv_status = False
-right_lane_det_prv_status = False
-left_lane_det_curt_status = False
-right_lane_det_curt_status = False
-left_lane_det_result_status = False
-right_lane_det_result_status = False
-
 left_lane_det = 0
 right_lane_det = 0
 
@@ -70,13 +62,10 @@ right_lane_det = 0
 @torch.no_grad()
 def main():
     global elapsed_time, fps, t0, ret, frame, left_lane_est_pos, right_lane_est_pos, lane_center_pos_list, \
-        lane_center_pos_arr, frame_idx, logging_data, normal_lane_det, left_lane_det, right_lane_det, \
-        left_lane_det_prv_status, left_lane_det_curt_status, left_lane_det_result_status,  \
-        right_lane_det_prv_status, right_lane_det_curt_status, right_lane_det_result_status
+        lane_center_pos_arr, frame_idx, logging_data, normal_lane_det, left_lane_det, right_lane_det
 
     while cap.isOpened():
         elapsed_time = time.time() - start_time
-        t0 = time.time()
         ret, frame = cap.read()
 
         if ret:
@@ -117,8 +106,7 @@ def main():
             available_left_lane_pos = (extract_left_lane_pos.shape[0] / (input_height - look_ahead_row_pos)) > 0.3
 
             if available_left_lane_pos:
-                est_left_lane.fit(extract_left_lane_pos[:, 0].reshape(-1, 1),
-                                  extract_left_lane_pos[:, 1].reshape(-1, 1),
+                est_left_lane.fit(extract_left_lane_pos[:, 0].reshape(-1, 1), extract_left_lane_pos[:, 1].reshape(-1, 1),
                                   sample_weight=5)
                 out = est_left_lane.predict(lane_ref_row_pos.reshape(-1, 1))
                 out = out.reshape(-1).astype(np.int32)
@@ -142,8 +130,7 @@ def main():
             available_right_lane_pos = (extract_right_lane_pos.shape[0] / (input_height - look_ahead_row_pos)) > 0.3
 
             if available_right_lane_pos:
-                est_right_lane.fit(extract_right_lane_pos[:, 0].reshape(-1, 1),
-                                   extract_right_lane_pos[:, 1].reshape(-1, 1),
+                est_right_lane.fit(extract_right_lane_pos[:, 0].reshape(-1, 1), extract_right_lane_pos[:, 1].reshape(-1, 1),
                                    sample_weight=5)
                 out = est_right_lane.predict(lane_ref_row_pos.reshape(-1, 1))
                 out = out.reshape(-1).astype(np.int32)
@@ -156,8 +143,8 @@ def main():
 
             if available_left_lane_pos and available_right_lane_pos:
                 for i, row in enumerate(lane_ref_row_pos):
-                    lane_center_x_pos = ((right_lane_est_pos[i, 1] - left_lane_est_pos[i, 1]) / 2) + left_lane_est_pos[
-                        i, 1]
+                    lane_center_x_pos = (((right_lane_est_pos[i, 1] - left_lane_est_pos[i, 1]) / 2)
+                                         + left_lane_est_pos[i, 1])
                     lane_center_pos_list.append([row, lane_center_x_pos])
 
                 lane_center_pos_arr = np.array(lane_center_pos_list, dtype=np.int32)
@@ -171,21 +158,18 @@ def main():
             left_lane_x_axis_dist = vehicle_center_pos - left_lane_est_pos[left_lane_est_pos.shape[0] - 1, 1]
             right_lane_x_axis_dist = right_lane_est_pos[right_lane_est_pos.shape[0] - 1, 1] - vehicle_center_pos
 
-            left_lane_det_curt_status = left_lane_x_axis_dist < 130
-            right_lane_det_curt_status = right_lane_x_axis_dist < 130
-
-            left_lane_det_result_status = left_lane_det_prv_status or left_lane_det_curt_status
-            right_lane_det_result_status = right_lane_det_prv_status or right_lane_det_curt_status
-
+            left_lane_departure, right_lane_departure = lane_det_filter(left_lane_x_axis_dist < 130,
+                                                                        right_lane_x_axis_dist < 130)
             fps = 1 / (time.time() - t0)
+            t0 = time.time()
 
-            if left_lane_det_prv_status or left_lane_det_curt_status:
+            if left_lane_departure:
                 left_lane_det += 1
 
-            if right_lane_det_prv_status or right_lane_det_curt_status:
+            if right_lane_departure:
                 right_lane_det += 1
 
-            if not left_lane_det_result_status and not right_lane_det_result_status:
+            if not left_lane_departure and not right_lane_departure:
                 normal_lane_det += 1
 
             cv2.putText(result_frame, f'Elapsed Time(sec): {elapsed_time: .2f}', (5, 20), font, 0.5, [0, 0, 255], 1)
@@ -200,9 +184,7 @@ def main():
             logging_data = pd.DataFrame({'1': round(elapsed_time, 2), '2': frame_idx, '3': normal_lane_det,
                                          '4': left_lane_det, '5': right_lane_det, '6': round(fps, 2)}, index=[0])
             logging_data.to_csv(logging_file_path, mode='a', header=False)
-
-            left_lane_det_prv_status = left_lane_det_curt_status
-            right_lane_det_prv_status = right_lane_det_curt_status
+            print(left_lane_x_axis_dist, right_lane_x_axis_dist)
             frame_idx += 1
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
