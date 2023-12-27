@@ -1,10 +1,16 @@
-import cv2, torch, time
+import cv2, torch, time, can
 import numpy as np
 import pandas as pd
 from module import LaneClassification
 from torchvision import transforms
 from sklearn.linear_model import RANSACRegressor
 from utils.lane_detection_recognition import lane_det_filter
+from utils.system_communication import AdasCANCommunication, ClusterCANCommunication
+
+vehicle_can_ch = can.interface.Bus(bustype='pcan', channel='PCAN_USBBUS1', bitrate=500000)
+
+adas_can_parser = AdasCANCommunication(dbc_filename='resource/ADAS_can_protocol.dbc')
+clu_can_parser = ClusterCANCommunication(dbc_filename='resource/Evits_EV_CAN_DBC_CLU_LDWS.dbc')
 
 device = torch.device('cuda:0')
 model = LaneClassification.load_from_checkpoint(checkpoint_path='resnet_50_640_360_v2.ckpt',
@@ -57,12 +63,14 @@ frame_idx = 0
 normal_lane_det = 0
 left_lane_det = 0
 right_lane_det = 0
+lane_det_state = 0
+msg_list = []
 
 
 @torch.no_grad()
 def main():
     global elapsed_time, fps, t0, ret, frame, left_lane_est_pos, right_lane_est_pos, lane_center_pos_list, \
-        lane_center_pos_arr, frame_idx, logging_data, normal_lane_det, left_lane_det, right_lane_det
+        lane_center_pos_arr, frame_idx, logging_data, normal_lane_det, left_lane_det, right_lane_det, lane_det_state
 
     while cap.isOpened():
         elapsed_time = time.time() - start_time
@@ -165,12 +173,15 @@ def main():
 
             if left_lane_departure:
                 left_lane_det += 1
+                lane_det_state = 1
 
             if right_lane_departure:
                 right_lane_det += 1
+                lane_det_state = 2
 
             if not left_lane_departure and not right_lane_departure:
                 normal_lane_det += 1
+                lane_det_state = 0
 
             cv2.putText(result_frame, f'Elapsed Time(sec): {elapsed_time: .2f}', (5, 20), font, 0.5, [0, 0, 255], 1)
             cv2.putText(result_frame, f'Process Speed(FPS): {fps: .2f}', (5, 40), font, 0.5, [0, 0, 255], 1)
@@ -184,11 +195,19 @@ def main():
             logging_data = pd.DataFrame({'1': round(elapsed_time, 2), '2': frame_idx, '3': normal_lane_det,
                                          '4': left_lane_det, '5': right_lane_det, '6': round(fps, 2)}, index=[0])
             logging_data.to_csv(logging_file_path, mode='a', header=False)
-            print(left_lane_x_axis_dist, right_lane_x_axis_dist)
             frame_idx += 1
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+
+            msg_list.append(adas_can_parser.create_ldws_can_msg(ldws_state=lane_det_state+1))
+            msg_list.append(clu_can_parser.create_ldws_can_msg(ldws_state=lane_det_state))
+
+            for msg in msg_list:
+                vehicle_can_ch.send(msg)
+                vehicle_can_ch.flush_tx_buffer()
+
+            msg_list.clear()
 
         else:
             break
