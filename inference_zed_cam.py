@@ -114,7 +114,8 @@ def main():
             available_left_lane_pos = (extract_left_lane_pos.shape[0] / (input_height - look_ahead_row_pos)) > 0.3
 
             if available_left_lane_pos:
-                est_left_lane.fit(extract_left_lane_pos[:, 0].reshape(-1, 1), extract_left_lane_pos[:, 1].reshape(-1, 1),
+                est_left_lane.fit(extract_left_lane_pos[:, 0].reshape(-1, 1),
+                                  extract_left_lane_pos[:, 1].reshape(-1, 1),
                                   sample_weight=5)
                 out = est_left_lane.predict(lane_ref_row_pos.reshape(-1, 1))
                 out = out.reshape(-1).astype(np.int32)
@@ -138,7 +139,8 @@ def main():
             available_right_lane_pos = (extract_right_lane_pos.shape[0] / (input_height - look_ahead_row_pos)) > 0.3
 
             if available_right_lane_pos:
-                est_right_lane.fit(extract_right_lane_pos[:, 0].reshape(-1, 1), extract_right_lane_pos[:, 1].reshape(-1, 1),
+                est_right_lane.fit(extract_right_lane_pos[:, 0].reshape(-1, 1),
+                                   extract_right_lane_pos[:, 1].reshape(-1, 1),
                                    sample_weight=5)
                 out = est_right_lane.predict(lane_ref_row_pos.reshape(-1, 1))
                 out = out.reshape(-1).astype(np.int32)
@@ -183,6 +185,8 @@ def main():
                 normal_lane_det += 1
                 lane_det_state = 0
 
+            frame_idx += 1
+
             cv2.putText(result_frame, f'Elapsed Time(sec): {elapsed_time: .2f}', (5, 20), font, 0.5, [0, 0, 255], 1)
             cv2.putText(result_frame, f'Process Speed(FPS): {fps: .2f}', (5, 40), font, 0.5, [0, 0, 255], 1)
             cv2.putText(result_frame, f'N of Frame: {frame_idx}', (5, 60), font, 0.5, [0, 0, 255], 1)
@@ -195,7 +199,6 @@ def main():
             logging_data = pd.DataFrame({'1': round(elapsed_time, 2), '2': frame_idx, '3': normal_lane_det,
                                          '4': left_lane_det, '5': right_lane_det, '6': round(fps, 2)}, index=[0])
             logging_data.to_csv(logging_file_path, mode='a', header=False)
-            frame_idx += 1
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -205,7 +208,7 @@ def main():
 
             for msg in msg_list:
                 vehicle_can_ch.send(msg)
-                vehicle_can_ch.flush_tx_buffer()
+                # vehicle_can_ch.flush_tx_buffer()
 
             msg_list.clear()
 
