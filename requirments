@@ -3,3 +3,4 @@ scikit-learn
 pytorch-lightning["extra"]
 cantools
 uptime
+ujson
