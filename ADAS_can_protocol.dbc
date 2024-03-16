@@ -47,7 +47,7 @@ BO_ 801 FCW: 8 Vector__XXX
 BO_ 800 DSM: 8 Vector__XXX
  SG_ state_of_DSM : 0|4@1+ (1,0) [0|3] "" Vector__XXX
 
-BO_ 703 CLU_info: 8 Vector__XXX
+BO_ 673 CLU_info: 8 Vector__XXX
  SG_ vehicle_speed_high_precision : 48|16@1+ (0.01,0) [0|150] "" Vector__XXX
  SG_ steering_angle : 32|16@1- (0.1,0) [-3276.8|3276.7] "" Vector__XXX
  SG_ vehicle_speed_low_precision : 16|8@1+ (1,0) [0|255] "" Vector__XXX
